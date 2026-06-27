@@ -99,4 +99,22 @@ t_rules_lists_and_marks() {
 
 t_rules_lists_and_marks
 
+t_check_mismatch_then_ok() {
+  _sandbox; r="$(new_repo check1)"; cd "$r"
+  git remote add origin "git@github.com:InteractionLabs/x.git"
+  printf '[includeIf "hasconfig:remote.*.url:*github.com[:/]InteractionLabs/**"]\n\tpath = %s/traversal.gitconfig\n' "$GITID_DIR" > "$SANDBOX/.gitconfig"
+  # force a wrong local identity
+  git config --local user.email "hg@example.com"
+  run check
+  assert_status "$ST" 1 check_mismatch_status
+  assert_contains "$OUT" "mismatch" check_mismatch_msg
+  # fix it
+  git config --local --unset-all user.email
+  run traversal; run check
+  assert_status "$ST" 0 check_ok_status
+  cd /; _cleanup
+}
+
+t_check_mismatch_then_ok
+
 summary

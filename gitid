@@ -78,6 +78,39 @@ cmd_rules() {
   done
 }
 
+# shellcheck disable=SC2088
+expand_tilde() { case "$1" in "~/"*) printf '%s/%s' "$HOME" "${1#~/}" ;; *) printf '%s' "$1" ;; esac; }
+
+expected_identity_file() {
+  urls="$(repo_urls)"
+  [ -n "$urls" ] || return 0
+  git config --get-regexp '^includeif\..*\.path$' 2>/dev/null | while IFS= read -r line; do
+    key=${line%% *}; val=${line#* }
+    glob="$(rule_glob "$key")"
+    for u in $urls; do
+      # shellcheck disable=SC2254
+      case "$u" in $glob) printf '%s' "$val"; return 0 ;; esac
+    done
+  done
+}
+
+cmd_check() {
+  in_repo || die "not in a git repo"
+  eff="$(git config user.email 2>/dev/null || true)"
+  exp_file="$(expected_identity_file)"
+  if [ -z "$exp_file" ]; then
+    [ -n "$eff" ] && { printf 'gitid: ok (no rule matches; identity=%s)\n' "$eff"; return 0; }
+    die "no identity set and no matching rule"
+  fi
+  exp_email="$(git config -f "$(expand_tilde "$exp_file")" user.email 2>/dev/null || true)"
+  if [ "$eff" = "$exp_email" ] && [ -n "$eff" ]; then
+    printf 'gitid: ok (%s)\n' "$eff"; return 0
+  fi
+  nm=${exp_file##*/}; nm=${nm%.gitconfig}
+  printf 'gitid: identity mismatch: effective=%s expected=%s\n  fix: gitid %s\n' "${eff:-(unset)}" "$exp_email" "$nm" >&2
+  return 1
+}
+
 cmd_help() {
   printf 'usage: gitid <name>|show|rules|check|migrate [dir]|migrate-global|completion <bash|zsh>\n'
   printf '  GITID_DIR=%s\n' "$GITID_DIR"
@@ -91,6 +124,7 @@ main() {
     help|-h|--help|"") cmd_help ;;
     show) shift; cmd_show "$@" ;;
     rules) shift; cmd_rules "$@" ;;
+    check) shift; cmd_check "$@" ;;
     *) cmd_apply "$cmd" ;;
   esac
 }
