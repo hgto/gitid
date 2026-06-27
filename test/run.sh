@@ -163,6 +163,19 @@ t_completion_emits_bash() {
 
 t_completion_emits_bash
 
+t_completion_via_symlink() {
+  # Regression: invoked through a symlink (e.g. ~/bin/gitid -> .../vendor/gitid/gitid),
+  # completion must resolve the link to find its bundled completion/ files.
+  _sandbox
+  ln -s "$GITID" "$SANDBOX/gitid-link"
+  OUT="$("$SANDBOX/gitid-link" completion bash 2>&1)"; ST=$?
+  assert_status "$ST" 0 comp_symlink_status
+  assert_contains "$OUT" "complete -F" comp_symlink_has_complete
+  cd /; _cleanup
+}
+
+t_completion_via_symlink
+
 # Regression: expand_tilde must quote ~ in strip pattern
 # Before the fix, ${1#~/} undergoes tilde expansion so ~/... paths are NOT
 # expanded correctly — they become $HOME/~/... instead of $HOME/...
