@@ -1,0 +1,31 @@
+#!/usr/bin/env sh
+set -eu
+
+GITID_DIR="${GITID_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/git}"
+
+die() { printf 'gitid: %s\n' "$1" >&2; exit "${2:-1}"; }
+in_repo() { git rev-parse --is-inside-work-tree >/dev/null 2>&1; }
+
+list_names() {
+  for p in "$GITID_DIR"/*.gitconfig; do
+    [ -f "$p" ] || continue
+    b=${p##*/}; printf '%s\n' "${b%.gitconfig}"
+  done
+}
+
+cmd_help() {
+  printf 'usage: gitid <name>|show|rules|check|migrate [dir]|migrate-global|completion <bash|zsh>\n'
+  printf '  GITID_DIR=%s\n' "$GITID_DIR"
+  printf 'identities:\n'
+  list_names | sed 's/^/  /'
+}
+
+main() {
+  cmd="${1:-help}"
+  case "$cmd" in
+    help|-h|--help|"") cmd_help ;;
+    *) die "unknown command: $cmd (try: gitid help)" 2 ;;
+  esac
+}
+
+main "$@"
