@@ -1,0 +1,11 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck gitid completion/gitid.bash test/run.sh test/helpers.sh
+      - name: posix sh tests
+        run: sh test/run.sh

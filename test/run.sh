@@ -15,7 +15,7 @@ t_help_lists_identities() {
 t_help_lists_identities
 
 t_apply_sets_include() {
-  _sandbox; r="$(new_repo apply1)"; cd "$r"
+  _sandbox; r="$(new_repo apply1)"; cd "$r" || exit
   run traversal
   assert_status "$ST" 0 apply_status
   assert_eq "$(git config user.email)" "trav@example.com" apply_email
@@ -25,7 +25,7 @@ t_apply_sets_include() {
 }
 
 t_apply_idempotent_and_switch() {
-  _sandbox; r="$(new_repo apply2)"; cd "$r"
+  _sandbox; r="$(new_repo apply2)"; cd "$r" || exit
   run traversal; run traversal
   assert_eq "$(git config --local --get-all include.path | wc -l | tr -d ' ')" "1" apply_twice_one
   run hgto
@@ -35,7 +35,7 @@ t_apply_idempotent_and_switch() {
 }
 
 t_apply_strips_residue() {
-  _sandbox; r="$(new_repo apply3)"; cd "$r"
+  _sandbox; r="$(new_repo apply3)"; cd "$r" || exit
   # simulate legacy `cat >>` residue placed AFTER an include line (the shadowing case)
   git config --local --add include.path "$GITID_DIR/traversal.gitconfig"
   printf '[user]\n\temail = old-cat@example.com\n' >> .git/config
@@ -45,7 +45,7 @@ t_apply_strips_residue() {
 }
 
 t_apply_unknown_name_errors() {
-  _sandbox; r="$(new_repo apply4)"; cd "$r"
+  _sandbox; r="$(new_repo apply4)"; cd "$r" || exit
   run nope
   assert_status "$ST" 1 unknown_status
   assert_contains "$OUT" "no identity file" unknown_msg
@@ -58,7 +58,7 @@ t_apply_strips_residue
 t_apply_unknown_name_errors
 
 t_show_reports_active() {
-  _sandbox; r="$(new_repo show1)"; cd "$r"
+  _sandbox; r="$(new_repo show1)"; cd "$r" || exit
   run traversal; run show
   assert_status "$ST" 0 show_status
   assert_contains "$OUT" "email:  trav@example.com" show_email
@@ -67,14 +67,14 @@ t_show_reports_active() {
 }
 
 t_show_none_when_unset() {
-  _sandbox; r="$(new_repo show2)"; cd "$r"
+  _sandbox; r="$(new_repo show2)"; cd "$r" || exit
   run show
   assert_contains "$OUT" "active: (none / inherited)" show_none
   cd /; _cleanup
 }
 
 t_show_warns_residue() {
-  _sandbox; r="$(new_repo show3)"; cd "$r"
+  _sandbox; r="$(new_repo show3)"; cd "$r" || exit
   git config --local user.email "old-cat@example.com"
   run show
   assert_contains "$OUT" "warning" show_warn
@@ -86,7 +86,7 @@ t_show_none_when_unset
 t_show_warns_residue
 
 t_rules_lists_and_marks() {
-  _sandbox; r="$(new_repo rules1)"; cd "$r"
+  _sandbox; r="$(new_repo rules1)"; cd "$r" || exit
   git remote add origin "git@github.com:InteractionLabs/x.git"
   # seed an includeIf rule into this repo's effective config via a global file
   printf '[includeIf "hasconfig:remote.*.url:*github.com[:/]InteractionLabs/**"]\n\tpath = %s/traversal.gitconfig\n' "$GITID_DIR" > "$SANDBOX/.gitconfig"
@@ -100,7 +100,7 @@ t_rules_lists_and_marks() {
 t_rules_lists_and_marks
 
 t_check_mismatch_then_ok() {
-  _sandbox; r="$(new_repo check1)"; cd "$r"
+  _sandbox; r="$(new_repo check1)"; cd "$r" || exit
   git remote add origin "git@github.com:InteractionLabs/x.git"
   printf '[includeIf "hasconfig:remote.*.url:*github.com[:/]InteractionLabs/**"]\n\tpath = %s/traversal.gitconfig\n' "$GITID_DIR" > "$SANDBOX/.gitconfig"
   # force a wrong local identity
