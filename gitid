@@ -149,7 +149,7 @@ cmd_migrate_global() {
   for p in $inc; do files="$files
 $(expand_tilde "$p")"; done
   printf '%s\n' "$files" | while IFS= read -r fpath; do
-    [ -n "$fpath" ] && [ -f "$fpath" ] || continue
+    if [ -z "$fpath" ] || [ ! -f "$fpath" ]; then continue; fi
     had=""
     for key in user.name user.email user.signingkey github.user; do
       v="$(git config -f "$fpath" --get "$key" 2>/dev/null || true)"
