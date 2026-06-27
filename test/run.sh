@@ -57,4 +57,32 @@ t_apply_idempotent_and_switch
 t_apply_strips_residue
 t_apply_unknown_name_errors
 
+t_show_reports_active() {
+  _sandbox; r="$(new_repo show1)"; cd "$r"
+  run traversal; run show
+  assert_status "$ST" 0 show_status
+  assert_contains "$OUT" "email:  trav@example.com" show_email
+  assert_contains "$OUT" "active: traversal" show_active
+  cd /; _cleanup
+}
+
+t_show_none_when_unset() {
+  _sandbox; r="$(new_repo show2)"; cd "$r"
+  run show
+  assert_contains "$OUT" "active: (none / inherited)" show_none
+  cd /; _cleanup
+}
+
+t_show_warns_residue() {
+  _sandbox; r="$(new_repo show3)"; cd "$r"
+  git config --local user.email "old-cat@example.com"
+  run show
+  assert_contains "$OUT" "warning" show_warn
+  cd /; _cleanup
+}
+
+t_show_reports_active
+t_show_none_when_unset
+t_show_warns_residue
+
 summary

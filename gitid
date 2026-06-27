@@ -36,6 +36,26 @@ cmd_apply() {
   printf 'gitid: %s applied\n' "$name"
 }
 
+active_identity() {
+  git config --local --get-all include.path 2>/dev/null | while IFS= read -r v; do
+    case "$v" in
+      "$GITID_DIR"/*.gitconfig) b=${v##*/}; printf '%s' "${b%.gitconfig}"; return 0 ;;
+    esac
+  done
+}
+
+cmd_show() {
+  in_repo || die "not in a git repo"
+  act="$(active_identity)"; [ -n "$act" ] || act="(none / inherited)"
+  printf 'name:   %s\n' "$(git config user.name 2>/dev/null || printf '(unset)')"
+  printf 'email:  %s\n' "$(git config user.email 2>/dev/null || printf '(unset)')"
+  printf 'active: %s\n' "$act"
+  if git config --local --get user.email >/dev/null 2>&1 \
+     || git config --local --get user.name >/dev/null 2>&1; then
+    printf 'gitid: warning: inline local identity present; it shadows includes\n' >&2
+  fi
+}
+
 cmd_help() {
   printf 'usage: gitid <name>|show|rules|check|migrate [dir]|migrate-global|completion <bash|zsh>\n'
   printf '  GITID_DIR=%s\n' "$GITID_DIR"
@@ -47,6 +67,7 @@ main() {
   cmd="${1:-help}"
   case "$cmd" in
     help|-h|--help|"") cmd_help ;;
+    show) shift; cmd_show "$@" ;;
     *) cmd_apply "$cmd" ;;
   esac
 }
