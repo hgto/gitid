@@ -13,6 +13,29 @@ list_names() {
   done
 }
 
+# escape ERE metacharacters; uses `#` as the sed delimiter so `/` in paths needs no escaping.
+# `]` is first in the bracket so it is literal; the set covers the chars that can appear in a path.
+ere_escape() { printf '%s' "$1" | sed 's#[][(){}.^$*+?|\\]#\\&#g'; }
+identity_file() { printf '%s/%s.gitconfig' "$GITID_DIR" "$1"; }
+
+strip_local_identity() {
+  for key in user.name user.email user.signingkey github.user; do
+    git config --local --unset-all "$key" 2>/dev/null || :
+  done
+}
+
+cmd_apply() {
+  name="$1"
+  f="$(identity_file "$name")"
+  [ -f "$f" ] || die "no identity file: $f"
+  in_repo || die "not in a git repo"
+  strip_local_identity
+  pat="^$(ere_escape "$GITID_DIR")/.*\.gitconfig\$"
+  git config --local --unset-all include.path "$pat" 2>/dev/null || :
+  git config --local --add include.path "$f"
+  printf 'gitid: %s applied\n' "$name"
+}
+
 cmd_help() {
   printf 'usage: gitid <name>|show|rules|check|migrate [dir]|migrate-global|completion <bash|zsh>\n'
   printf '  GITID_DIR=%s\n' "$GITID_DIR"
@@ -24,7 +47,7 @@ main() {
   cmd="${1:-help}"
   case "$cmd" in
     help|-h|--help|"") cmd_help ;;
-    *) die "unknown command: $cmd (try: gitid help)" 2 ;;
+    *) cmd_apply "$cmd" ;;
   esac
 }
 
