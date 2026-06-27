@@ -163,4 +163,38 @@ t_completion_emits_bash() {
 
 t_completion_emits_bash
 
+# Regression: expand_tilde must quote ~ in strip pattern
+# Before the fix, ${1#~/} undergoes tilde expansion so ~/... paths are NOT
+# expanded correctly — they become $HOME/~/... instead of $HOME/...
+
+t_check_tilde_path_in_includeif() {
+  _sandbox; r="$(new_repo check_tilde)"; cd "$r" || exit
+  git remote add origin "git@github.com:InteractionLabs/x.git"
+  # Use tilde form ~/ids/traversal.gitconfig in the global includeIf path
+  printf '[includeIf "hasconfig:remote.*.url:*github.com[:/]InteractionLabs/**"]\n\tpath = ~/ids/traversal.gitconfig\n' > "$SANDBOX/.gitconfig"
+  # Set local identity to what traversal.gitconfig provides
+  git config --local user.email "trav@example.com"
+  run check
+  assert_status "$ST" 0 check_tilde_status
+  assert_contains "$OUT" "gitid: ok" check_tilde_msg
+  cd /; _cleanup
+}
+
+t_check_tilde_path_in_includeif
+
+t_migrate_global_tilde_unconditional_include() {
+  _sandbox
+  # Seed global config with inline user identity AND unconditional include using ~/... path
+  printf '[user]\n\temail = glob@example.com\n[include]\n\tpath = ~/ids/extra.gitconfig\n' > "$SANDBOX/.gitconfig"
+  # Create the referenced file with a user identity that should be stripped
+  printf '[user]\n\temail = inc@example.com\n' > "$SANDBOX/ids/extra.gitconfig"
+  run migrate-global --apply
+  # The include file's identity must be stripped (this is what the bug silently skips)
+  result="$(git config -f "$SANDBOX/ids/extra.gitconfig" user.email 2>/dev/null || printf EMPTY)"
+  assert_eq "$result" "EMPTY" mg_tilde_include_stripped
+  cd /; _cleanup
+}
+
+t_migrate_global_tilde_unconditional_include
+
 summary
