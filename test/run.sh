@@ -151,4 +151,16 @@ t_migrate_global_strips_default_keeps_includeif() {
 
 t_migrate_global_strips_default_keeps_includeif
 
+t_completion_emits_bash() {
+  _sandbox
+  run completion bash
+  assert_status "$ST" 0 comp_status
+  assert_contains "$OUT" "complete -F" comp_has_complete
+  run completion fish
+  assert_status "$ST" 1 comp_bad_shell
+  cd /; _cleanup
+}
+
+t_completion_emits_bash
+
 summary

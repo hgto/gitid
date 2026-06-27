@@ -167,6 +167,16 @@ $(expand_tilde "$p")"; done
   done
 }
 
+cmd_completion() {
+  # shellcheck disable=SC1007
+  here="$(CDPATH= cd "$(dirname "$0")" && pwd)"
+  case "${1:-}" in
+    bash) cat "$here/completion/gitid.bash" ;;
+    zsh)  cat "$here/completion/gitid.zsh" ;;
+    *) die "completion: specify bash or zsh" ;;
+  esac
+}
+
 cmd_help() {
   printf 'usage: gitid <name>|show|rules|check|migrate [dir]|migrate-global|completion <bash|zsh>\n'
   printf '  GITID_DIR=%s\n' "$GITID_DIR"
@@ -183,6 +193,7 @@ main() {
     check) shift; cmd_check "$@" ;;
     migrate) shift; cmd_migrate "$@" ;;
     migrate-global) shift; cmd_migrate_global "$@" ;;
+    completion) shift; cmd_completion "$@" ;;
     *) cmd_apply "$cmd" ;;
   esac
 }
