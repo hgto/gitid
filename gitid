@@ -111,6 +111,30 @@ cmd_check() {
   return 1
 }
 
+cmd_migrate() {
+  apply=0; dir="."
+  for a in "$@"; do
+    case "$a" in --apply) apply=1 ;; *) dir="$a" ;; esac
+  done
+  find "$dir" -type d -name .git 2>/dev/null | while IFS= read -r g; do
+    repo=${g%/.git}
+    had=""
+    for key in user.name user.email user.signingkey github.user; do
+      v="$(git -C "$repo" config --local --get "$key" 2>/dev/null || true)"
+      [ -n "$v" ] && had="$had $key"
+    done
+    if [ -z "$had" ]; then printf 'clean       %s\n' "$repo"; continue; fi
+    if [ "$apply" -eq 1 ]; then
+      for key in user.name user.email user.signingkey github.user; do
+        git -C "$repo" config --local --unset-all "$key" 2>/dev/null || :
+      done
+      printf 'cleaned     %s (%s )\n' "$repo" "$had"
+    else
+      printf 'would-clean %s (%s )\n' "$repo" "$had"
+    fi
+  done
+}
+
 cmd_help() {
   printf 'usage: gitid <name>|show|rules|check|migrate [dir]|migrate-global|completion <bash|zsh>\n'
   printf '  GITID_DIR=%s\n' "$GITID_DIR"
@@ -125,6 +149,7 @@ main() {
     show) shift; cmd_show "$@" ;;
     rules) shift; cmd_rules "$@" ;;
     check) shift; cmd_check "$@" ;;
+    migrate) shift; cmd_migrate "$@" ;;
     *) cmd_apply "$cmd" ;;
   esac
 }

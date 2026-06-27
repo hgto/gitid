@@ -117,4 +117,21 @@ t_check_mismatch_then_ok() {
 
 t_check_mismatch_then_ok
 
+t_migrate_dryrun_then_apply() {
+  _sandbox
+  a="$(new_repo mig_a)"; b="$(new_repo mig_b)"
+  git -C "$a" config --local user.email "old@example.com"
+  run migrate "$SANDBOX"
+  assert_status "$ST" 0 migrate_dry_status
+  assert_contains "$OUT" "would-clean" migrate_dry_marks
+  assert_eq "$(git -C "$a" config --local --get user.email)" "old@example.com" migrate_dry_nowrite
+  run migrate --apply "$SANDBOX"
+  assert_contains "$OUT" "cleaned" migrate_apply_marks
+  assert_eq "$(git -C "$a" config --local --get user.email 2>/dev/null || printf EMPTY)" "EMPTY" migrate_apply_wrote
+  : "$b"
+  cd /; _cleanup
+}
+
+t_migrate_dryrun_then_apply
+
 summary
