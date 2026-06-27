@@ -134,4 +134,21 @@ t_migrate_dryrun_then_apply() {
 
 t_migrate_dryrun_then_apply
 
+t_migrate_global_strips_default_keeps_includeif() {
+  _sandbox
+  # global file has an inline default identity AND a conditional includeIf snippet ref
+  printf '[user]\n\temail = global-default@example.com\n[includeIf "hasconfig:remote.*.url:*github.com[:/]ypcrts/**"]\n\tpath = %s/traversal.gitconfig\n' "$GITID_DIR" > "$SANDBOX/.gitconfig"
+  run migrate-global
+  assert_contains "$OUT" "would-clean" mg_dry
+  assert_eq "$(git config --global --get user.email)" "global-default@example.com" mg_dry_nowrite
+  run migrate-global --apply
+  assert_contains "$OUT" "cleaned" mg_apply
+  assert_eq "$(git config --global --get user.email 2>/dev/null || printf EMPTY)" "EMPTY" mg_removed
+  # the includeIf snippet must be untouched
+  assert_eq "$(git config -f "$GITID_DIR/traversal.gitconfig" user.email)" "trav@example.com" mg_snippet_intact
+  cd /; _cleanup
+}
+
+t_migrate_global_strips_default_keeps_includeif
+
 summary

@@ -135,6 +135,38 @@ cmd_migrate() {
   done
 }
 
+global_config_file() {
+  if [ -n "${GIT_CONFIG_GLOBAL:-}" ]; then printf '%s' "$GIT_CONFIG_GLOBAL"
+  elif [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/git/config" ]; then printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/git/config"
+  else printf '%s' "$HOME/.gitconfig"; fi
+}
+
+cmd_migrate_global() {
+  apply=0; for a in "$@"; do [ "$a" = "--apply" ] && apply=1; done
+  files="$(global_config_file)"
+  # add files referenced by UNCONDITIONAL include.path (never includeif.*.path)
+  inc="$(git config --global --get-all include.path 2>/dev/null || true)"
+  for p in $inc; do files="$files
+$(expand_tilde "$p")"; done
+  printf '%s\n' "$files" | while IFS= read -r fpath; do
+    [ -n "$fpath" ] && [ -f "$fpath" ] || continue
+    had=""
+    for key in user.name user.email user.signingkey github.user; do
+      v="$(git config -f "$fpath" --get "$key" 2>/dev/null || true)"
+      [ -n "$v" ] && had="$had $key"
+    done
+    if [ -z "$had" ]; then printf 'clean       %s\n' "$fpath"; continue; fi
+    if [ "$apply" -eq 1 ]; then
+      for key in user.name user.email user.signingkey github.user; do
+        git config -f "$fpath" --unset-all "$key" 2>/dev/null || :
+      done
+      printf 'cleaned     %s (%s )\n' "$fpath" "$had"
+    else
+      printf 'would-clean %s (%s )\n' "$fpath" "$had"
+    fi
+  done
+}
+
 cmd_help() {
   printf 'usage: gitid <name>|show|rules|check|migrate [dir]|migrate-global|completion <bash|zsh>\n'
   printf '  GITID_DIR=%s\n' "$GITID_DIR"
@@ -150,6 +182,7 @@ main() {
     rules) shift; cmd_rules "$@" ;;
     check) shift; cmd_check "$@" ;;
     migrate) shift; cmd_migrate "$@" ;;
+    migrate-global) shift; cmd_migrate_global "$@" ;;
     *) cmd_apply "$cmd" ;;
   esac
 }
