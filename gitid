@@ -56,6 +56,28 @@ cmd_show() {
   fi
 }
 
+repo_urls() {
+  in_repo || return 0
+  git config --get-regexp '^remote\..*\.url$' 2>/dev/null | while read -r _ u; do printf '%s\n' "$u"; done
+}
+
+rule_glob() { g=${1#includeif.}; g=${g%.path}; printf '%s' "${g##*url:}"; }
+
+cmd_rules() {
+  urls="$(repo_urls)"
+  git config --get-regexp '^includeif\..*\.path$' 2>/dev/null | while IFS= read -r line; do
+    key=${line%% *}; val=${line#* }
+    glob="$(rule_glob "$key")"
+    nm=${val##*/}; nm=${nm%.gitconfig}
+    mark="  "
+    for u in $urls; do
+      # shellcheck disable=SC2254
+      case "$u" in $glob) mark="▸ "; break ;; esac
+    done
+    printf '%s%s -> %s\n' "$mark" "$glob" "$nm"
+  done
+}
+
 cmd_help() {
   printf 'usage: gitid <name>|show|rules|check|migrate [dir]|migrate-global|completion <bash|zsh>\n'
   printf '  GITID_DIR=%s\n' "$GITID_DIR"
@@ -68,6 +90,7 @@ main() {
   case "$cmd" in
     help|-h|--help|"") cmd_help ;;
     show) shift; cmd_show "$@" ;;
+    rules) shift; cmd_rules "$@" ;;
     *) cmd_apply "$cmd" ;;
   esac
 }

@@ -85,4 +85,18 @@ t_show_reports_active
 t_show_none_when_unset
 t_show_warns_residue
 
+t_rules_lists_and_marks() {
+  _sandbox; r="$(new_repo rules1)"; cd "$r"
+  git remote add origin "git@github.com:InteractionLabs/x.git"
+  # seed an includeIf rule into this repo's effective config via a global file
+  printf '[includeIf "hasconfig:remote.*.url:*github.com[:/]InteractionLabs/**"]\n\tpath = %s/traversal.gitconfig\n' "$GITID_DIR" > "$SANDBOX/.gitconfig"
+  run rules
+  assert_status "$ST" 0 rules_status
+  assert_contains "$OUT" "-> traversal" rules_name
+  assert_contains "$OUT" "▸" rules_mark
+  cd /; _cleanup
+}
+
+t_rules_lists_and_marks
+
 summary
