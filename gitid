@@ -24,6 +24,30 @@ strip_local_identity() {
   done
 }
 
+hooks_dir() { printf '%s/hooks' "$GITID_DIR"; }
+
+# Hand-rolled symlink resolution: neither `readlink -f` nor `realpath` is POSIX.
+self_path() {
+  self="$0"
+  while [ -h "$self" ]; do
+    # shellcheck disable=SC1007
+    sdir="$(CDPATH= cd "$(dirname "$self")" && pwd)"
+    link="$(readlink "$self")"
+    case "$link" in
+      /*) self="$link" ;;
+      *)  self="$sdir/$link" ;;
+    esac
+  done
+  # shellcheck disable=SC1007
+  sdir="$(CDPATH= cd "$(dirname "$self")" && pwd)"
+  printf '%s/%s' "$sdir" "${self##*/}"
+}
+
+snippet_enforced() {
+  [ -f "$1" ] || return 1
+  [ "$(git config -f "$1" --bool gitid.enforce 2>/dev/null || printf false)" = "true" ]
+}
+
 cmd_apply() {
   name="$1"
   f="$(identity_file "$name")"
@@ -50,6 +74,7 @@ cmd_show() {
   printf 'name:   %s\n' "$(git config user.name 2>/dev/null || printf '(unset)')"
   printf 'email:  %s\n' "$(git config user.email 2>/dev/null || printf '(unset)')"
   printf 'active: %s\n' "$act"
+  snippet_enforced "$(identity_file "$act")" && printf 'enforce: yes\n'
   if git config --local --get user.email >/dev/null 2>&1 \
      || git config --local --get user.name >/dev/null 2>&1; then
     printf 'gitid: warning: inline local identity present; it shadows includes\n' >&2
@@ -74,7 +99,9 @@ cmd_rules() {
       # shellcheck disable=SC2254
       case "$u" in $glob) mark="▸ "; break ;; esac
     done
-    printf '%s%s -> %s\n' "$mark" "$glob" "$nm"
+    tag=""
+    snippet_enforced "$(expand_tilde "$val")" && tag=" [enforced]"
+    printf '%s%s -> %s%s\n' "$mark" "$glob" "$nm" "$tag"
   done
 }
 
@@ -167,21 +194,173 @@ $(expand_tilde "$p")"; done
   done
 }
 
+cmd_enforce() {
+  name="${1:-}"; [ -n "$name" ] || die "enforce: specify an identity"
+  f="$(identity_file "$name")"; [ -f "$f" ] || die "no identity file: $f"
+  git config -f "$f" gitid.enforce true
+  printf 'gitid: %s enforced\n' "$name"
+}
+
+cmd_unenforce() {
+  name="${1:-}"; [ -n "$name" ] || die "unenforce: specify an identity"
+  f="$(identity_file "$name")"; [ -f "$f" ] || die "no identity file: $f"
+  git config -f "$f" --unset gitid.enforce 2>/dev/null || :
+  printf 'gitid: %s unenforced\n' "$name"
+}
+
+# Only enforced-identity mismatches fail here; the useConfigOnly floor set by
+# `guard install` already blocks the no-identity case.
+cmd_guard_check() {
+  in_repo || return 0
+  exp_file="$(expected_identity_file)"
+  [ -n "$exp_file" ] || return 0
+  exp_path="$(expand_tilde "$exp_file")"
+  snippet_enforced "$exp_path" || return 0
+  eff="$(git config user.email 2>/dev/null || true)"
+  exp_email="$(git config -f "$exp_path" user.email 2>/dev/null || true)"
+  [ "$eff" = "$exp_email" ] && [ -n "$eff" ] && return 0
+  nm=${exp_file##*/}; nm=${nm%.gitconfig}
+  printf 'gitid: identity mismatch (enforced): effective=%s expected=%s\n  fix: gitid %s\n' \
+    "${eff:-(unset)}" "$exp_email" "$nm" >&2
+  return 1
+}
+
+# client-side hook names installed as dispatchers so a global core.hooksPath
+# never silently shadows a prior global hook or a repo-local .git/hooks entry.
+# The specialized long-running/vendor hooks (fsmonitor-watchman, p4-*) are
+# deliberately omitted — they take non-standard args a generic dispatcher can't
+# safely pass through.
+DISPATCH_HOOKS='applypatch-msg pre-applypatch post-applypatch pre-commit pre-merge-commit prepare-commit-msg commit-msg post-commit pre-rebase post-checkout post-merge pre-auto-gc pre-push post-rewrite post-index-change reference-transaction push-to-checkout sendemail-validate'
+
+write_dispatcher() {
+  hd="$1"
+  cat > "$hd/gitid-dispatch" <<'HOOK'
+#!/usr/bin/env sh
+# Managed by `gitid guard`. Do not edit.
+# On pre-commit: enforce gitid identity rules. Always: chain the same-named
+# hook from the previous global hooks dir and the repo-local .git/hooks, so
+# core.hooksPath doesn't silently shadow them.
+set -u
+hook=${0##*/}
+
+# Only these hooks receive meaningful stdin. Capturing it for the others (e.g.
+# pre-commit) would `cat`-block forever when the commit runs as a subprocess
+# with an inherited open pipe as stdin — hanging every commit.
+stdin_file=
+case "$hook" in
+  pre-push|post-rewrite|reference-transaction|push-to-checkout)
+    if [ ! -t 0 ]; then
+      stdin_file=$(mktemp)
+      cat >"$stdin_file"
+    fi
+    ;;
+esac
+cleanup() { [ -n "$stdin_file" ] && rm -f "$stdin_file"; }
+feed() { if [ -n "$stdin_file" ]; then "$@" <"$stdin_file"; else "$@"; fi; }
+
+if [ "$hook" = pre-commit ]; then
+  bin=$(git config --global --get gitid.bin 2>/dev/null || true)
+  [ -x "$bin" ] || bin=$(command -v gitid 2>/dev/null || true)
+  if [ -z "$bin" ]; then
+    printf 'gitid: guard hook cannot locate the gitid binary; refusing commit\n' >&2
+    printf '  set gitid.bin, fix PATH, or run: gitid guard uninstall\n' >&2
+    cleanup; exit 1
+  fi
+  "$bin" guard check || { cleanup; exit 1; }
+fi
+
+prev=$(git config --global --get gitid.prevHooksPath 2>/dev/null || true)
+gitdir=$(git rev-parse --absolute-git-dir 2>/dev/null || true)
+repo=
+[ -n "$gitdir" ] && repo="$gitdir/hooks"
+for dir in "$prev" "$repo"; do
+  [ -n "$dir" ] || continue
+  h="$dir/$hook"
+  if [ -x "$h" ]; then
+    feed "$h" "$@" || { st=$?; cleanup; exit "$st"; }
+  fi
+done
+cleanup
+exit 0
+HOOK
+  chmod +x "$hd/gitid-dispatch"
+  for name in $DISPATCH_HOOKS; do
+    ln -sf gitid-dispatch "$hd/$name"
+  done
+}
+
+cmd_guard_install() {
+  hd="$(hooks_dir)"
+  git config --global user.useConfigOnly true
+  git config --global gitid.bin "$(self_path)"
+  prev="$(git config --global --get core.hooksPath 2>/dev/null || true)"
+  if [ -n "$prev" ] && [ "$prev" != "$hd" ]; then
+    git config --global gitid.prevHooksPath "$prev"
+  fi
+  mkdir -p "$hd"
+  write_dispatcher "$hd"
+  git config --global core.hooksPath "$hd"
+  printf 'gitid: guard installed (useConfigOnly=true, hooksPath=%s)\n' "$hd"
+}
+
+cmd_guard_uninstall() {
+  all=0
+  for a in "$@"; do [ "$a" = "--all" ] && all=1; done
+  hd="$(hooks_dir)"
+  cur="$(git config --global --get core.hooksPath 2>/dev/null || true)"
+  if [ "$cur" = "$hd" ]; then
+    prev="$(git config --global --get gitid.prevHooksPath 2>/dev/null || true)"
+    if [ -n "$prev" ]; then
+      git config --global core.hooksPath "$prev"
+    else
+      git config --global --unset core.hooksPath 2>/dev/null || :
+    fi
+  fi
+  git config --global --unset gitid.prevHooksPath 2>/dev/null || :
+  git config --global --unset gitid.bin 2>/dev/null || :
+  [ -d "$hd" ] && rm -rf "$hd"
+  if [ "$all" -eq 1 ]; then git config --global --unset user.useConfigOnly 2>/dev/null || :; fi
+  printf 'gitid: guard uninstalled\n'
+}
+
+cmd_guard_status() {
+  hd="$(hooks_dir)"
+  uco="$(git config --global --bool user.useConfigOnly 2>/dev/null || printf false)"
+  cur="$(git config --global --get core.hooksPath 2>/dev/null || true)"
+  printf 'useConfigOnly: %s\n' "$uco"
+  if [ "$cur" = "$hd" ]; then
+    printf 'hooksPath:     %s (gitid)\n' "$cur"
+  elif [ -n "$cur" ]; then
+    printf 'hooksPath:     %s (not gitid)\n' "$cur"
+  else
+    printf 'hooksPath:     (unset)\n'
+  fi
+  if [ -x "$hd/pre-commit" ]; then
+    printf 'dispatcher:    installed\n'
+  else
+    printf 'dispatcher:    missing\n'
+  fi
+  prev="$(git config --global --get gitid.prevHooksPath 2>/dev/null || true)"
+  [ -n "$prev" ] && printf 'chains to:     %s\n' "$prev"
+  return 0
+}
+
+cmd_guard() {
+  sub="${1:-status}"
+  [ $# -gt 0 ] && shift
+  case "$sub" in
+    install)   cmd_guard_install "$@" ;;
+    uninstall) cmd_guard_uninstall "$@" ;;
+    status)    cmd_guard_status "$@" ;;
+    check)     cmd_guard_check "$@" ;;
+    *) die "guard: unknown subcommand: $sub (install|uninstall|status|check)" ;;
+  esac
+}
+
 cmd_completion() {
   # Resolve $0 through any symlink chain (e.g. ~/bin/gitid -> .../vendor/gitid/gitid)
   # so completion/ files are found next to the real script, not next to the link.
-  self="$0"
-  while [ -h "$self" ]; do
-    # shellcheck disable=SC1007
-    sdir="$(CDPATH= cd "$(dirname "$self")" && pwd)"
-    link="$(readlink "$self")"
-    case "$link" in
-      /*) self="$link" ;;
-      *)  self="$sdir/$link" ;;
-    esac
-  done
-  # shellcheck disable=SC1007
-  here="$(CDPATH= cd "$(dirname "$self")" && pwd)"
+  here="$(dirname "$(self_path)")"
   case "${1:-}" in
     bash) cat "$here/completion/gitid.bash" ;;
     zsh)  cat "$here/completion/gitid.zsh" ;;
@@ -190,7 +369,9 @@ cmd_completion() {
 }
 
 cmd_help() {
-  printf 'usage: gitid <name>|show|rules|check|migrate [dir]|migrate-global|completion <bash|zsh>\n'
+  printf 'usage: gitid <name>|show|rules|check|enforce <name>|unenforce <name>\n'
+  printf '             |guard <install|uninstall|status>\n'
+  printf '             |migrate [dir]|migrate-global|completion <bash|zsh>\n'
   printf '  GITID_DIR=%s\n' "$GITID_DIR"
   printf 'identities:\n'
   list_names | sed 's/^/  /'
@@ -203,6 +384,9 @@ main() {
     show) shift; cmd_show "$@" ;;
     rules) shift; cmd_rules "$@" ;;
     check) shift; cmd_check "$@" ;;
+    enforce) shift; cmd_enforce "$@" ;;
+    unenforce) shift; cmd_unenforce "$@" ;;
+    guard) shift; cmd_guard "$@" ;;
     migrate) shift; cmd_migrate "$@" ;;
     migrate-global) shift; cmd_migrate_global "$@" ;;
     completion) shift; cmd_completion "$@" ;;

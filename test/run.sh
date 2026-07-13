@@ -210,4 +210,180 @@ t_migrate_global_tilde_unconditional_include() {
 
 t_migrate_global_tilde_unconditional_include
 
+# --- guardrail + enforcement ---------------------------------------------
+
+_isx() { if [ -x "$1" ]; then printf yes; else printf no; fi; }
+_exists() { if [ -e "$1" ]; then printf yes; else printf no; fi; }
+_committed() { if git commit -q "$@" 2>/dev/null; then printf yes; else printf no; fi; }
+seed_rule() {
+  printf '[includeIf "hasconfig:remote.*.url:*github.com[:/]InteractionLabs/**"]\n\tpath = %s/traversal.gitconfig\n' "$GITID_DIR" >> "$SANDBOX/.gitconfig"
+}
+
+t_guard_install_sets_floor_and_hook() {
+  _sandbox
+  run guard install
+  assert_status "$ST" 0 gi_status
+  assert_eq "$(git config --global --bool user.useConfigOnly)" "true" gi_useconfigonly
+  assert_eq "$(git config --global core.hooksPath)" "$GITID_DIR/hooks" gi_hookspath
+  assert_eq "$(_isx "$GITID_DIR/hooks/pre-commit")" "yes" gi_precommit_x
+  assert_eq "$(_isx "$GITID_DIR/hooks/pre-push")" "yes" gi_prepush_x
+  _cleanup
+}
+
+t_guard_status_reports() {
+  _sandbox
+  run guard install; run guard status
+  assert_contains "$OUT" "useConfigOnly: true" gs_uco
+  assert_contains "$OUT" "(gitid)" gs_owned
+  assert_contains "$OUT" "dispatcher:    installed" gs_disp
+  _cleanup
+}
+
+t_enforce_toggles_snippet() {
+  _sandbox
+  run enforce traversal
+  assert_status "$ST" 0 enf_status
+  assert_eq "$(git config -f "$GITID_DIR/traversal.gitconfig" --bool gitid.enforce)" "true" enf_set
+  run unenforce traversal
+  assert_eq "$(git config -f "$GITID_DIR/traversal.gitconfig" --bool gitid.enforce 2>/dev/null || printf unset)" "unset" enf_unset
+}
+
+t_rules_marks_enforced() {
+  _sandbox; r="$(new_repo rulesenf)"; cd "$r" || exit
+  git remote add origin "git@github.com:InteractionLabs/x.git"
+  seed_rule
+  run enforce traversal
+  run rules
+  assert_contains "$OUT" "[enforced]" rulesenf_mark
+  cd /; _cleanup
+}
+
+t_enforced_mismatch_blocks_commit() {
+  _sandbox
+  seed_rule
+  run guard install
+  run enforce traversal
+  r="$(new_repo enfblock)"; cd "$r" || exit
+  git remote add origin "git@github.com:InteractionLabs/x.git"
+  # wrong local identity shadows the rule's expected identity
+  git config --local user.email "hg@example.com"
+  git config --local user.name "Wrong"
+  : > f; git add f
+  assert_eq "$(_committed -m x)" "no" enfblock_blocked
+  cd /; _cleanup
+}
+
+t_enforced_match_commits() {
+  _sandbox
+  seed_rule
+  run guard install
+  run enforce traversal
+  r="$(new_repo enfok)"; cd "$r" || exit
+  git remote add origin "git@github.com:InteractionLabs/x.git"
+  : > f; git add f
+  assert_eq "$(_committed -m x)" "yes" enfok_commits
+  cd /; _cleanup
+}
+
+t_floor_blocks_no_identity() {
+  _sandbox
+  run guard install
+  r="$(new_repo floor)"; cd "$r" || exit
+  : > f; git add f
+  # no rule, no identity -> useConfigOnly makes git refuse
+  assert_eq "$(_committed -m x)" "no" floor_blocked
+  cd /; _cleanup
+}
+
+t_chaining_runs_prev_and_repo_hooks() {
+  _sandbox
+  mkdir -p "$SANDBOX/prevhooks"
+  printf '#!/bin/sh\ntouch "%s/PREV_RAN"\n' "$SANDBOX" > "$SANDBOX/prevhooks/pre-commit"
+  chmod +x "$SANDBOX/prevhooks/pre-commit"
+  git config --global core.hooksPath "$SANDBOX/prevhooks"
+  run guard install
+  assert_eq "$(git config --global gitid.prevHooksPath)" "$SANDBOX/prevhooks" chain_prev_recorded
+  r="$(new_repo chain)"; cd "$r" || exit
+  printf '#!/bin/sh\ntouch "%s/REPO_RAN"\n' "$SANDBOX" > .git/hooks/pre-commit
+  chmod +x .git/hooks/pre-commit
+  run traversal   # gives a valid identity (no rule matches -> enforcement passes)
+  : > f; git add f
+  assert_eq "$(_committed -m x)" "yes" chain_commits
+  assert_eq "$(_exists "$SANDBOX/PREV_RAN")" "yes" chain_prev_ran
+  assert_eq "$(_exists "$SANDBOX/REPO_RAN")" "yes" chain_repo_ran
+  cd /; _cleanup
+}
+
+t_noverify_bypasses_enforcement_not_floor() {
+  _sandbox
+  seed_rule
+  run guard install
+  run enforce traversal
+  r="$(new_repo noverify)"; cd "$r" || exit
+  git remote add origin "git@github.com:InteractionLabs/x.git"
+  git config --local user.email "hg@example.com"
+  git config --local user.name "Wrong"
+  : > f; git add f
+  # --no-verify skips the hook; identity IS set so the floor doesn't fire
+  assert_eq "$(_committed --no-verify -m x)" "yes" noverify_commits
+  cd /; _cleanup
+}
+
+t_uninstall_restores_prev() {
+  _sandbox
+  git config --global core.hooksPath "$SANDBOX/prevhooks"
+  run guard install
+  run guard uninstall
+  assert_eq "$(git config --global core.hooksPath)" "$SANDBOX/prevhooks" uninstall_restored
+  assert_eq "$(_exists "$GITID_DIR/hooks/pre-commit")" "no" uninstall_removed
+  _cleanup
+}
+
+t_precommit_no_hang_on_pipe_stdin() {
+  # Regression: pre-commit must NOT read stdin. A commit run with an inherited
+  # open pipe as stdin (agent/subprocess context) must not hang on `cat`.
+  can_bound || return 0   # truly no way to bound runtime; skip rather than risk a hang
+  _sandbox
+  run guard install
+  r="$(new_repo pipe)"; cd "$r" || exit
+  run traversal
+  : > f; git add f
+  mkfifo "$SANDBOX/f.fifo"
+  ( exec 9>"$SANDBOX/f.fifo"; sleep 30 ) &   # hold the fifo open well past the bound
+  wpid=$!
+  bounded 8 git commit -q -m x < "$SANDBOX/f.fifo"; st=$?
+  kill "$wpid" 2>/dev/null || true
+  wait "$wpid" 2>/dev/null || true   # reap so the shell doesn't print a "Terminated" notice
+  assert_status "$st" 0 pipe_no_hang
+  cd /; _cleanup
+}
+
+t_precommit_fails_closed_without_gitid() {
+  # Regression: if the hook can't locate a gitid binary, block the commit
+  # rather than silently skipping enforcement.
+  _sandbox
+  run guard install
+  git config --global gitid.bin "/nonexistent/gitid"
+  r="$(new_repo failclosed)"; cd "$r" || exit
+  run traversal   # valid identity, so only the missing-binary path can block
+  : > f; git add f
+  # PATH without gitid; git itself lives in /usr/bin or /bin
+  if PATH=/usr/bin:/bin git commit -q -m x 2>/dev/null; then out=yes; else out=no; fi
+  assert_eq "$out" "no" failclosed_blocked
+  cd /; _cleanup
+}
+
+t_guard_install_sets_floor_and_hook
+t_guard_status_reports
+t_precommit_no_hang_on_pipe_stdin
+t_precommit_fails_closed_without_gitid
+t_enforce_toggles_snippet
+t_rules_marks_enforced
+t_enforced_mismatch_blocks_commit
+t_enforced_match_commits
+t_floor_blocks_no_identity
+t_chaining_runs_prev_and_repo_hooks
+t_noverify_bypasses_enforcement_not_floor
+t_uninstall_restores_prev
+
 summary

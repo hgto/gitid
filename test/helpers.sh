@@ -17,6 +17,17 @@ _cleanup() { [ -n "${SANDBOX:-}" ] && rm -rf "$SANDBOX"; }
 
 new_repo() { d="$SANDBOX/repo_$1"; mkdir -p "$d"; git -C "$d" init -q; printf '%s' "$d"; }
 
+# macOS lacks timeout/gtimeout by default; perl's alarm+exec is the portable
+# fallback. Returns 250 when nothing can bound execution.
+bounded() {
+  n=$1; shift
+  if command -v timeout >/dev/null 2>&1; then timeout "$n" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$n" "$@"
+  elif command -v perl >/dev/null 2>&1; then perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' "$n" "$@"
+  else return 250; fi
+}
+can_bound() { command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1 || command -v perl >/dev/null 2>&1; }
+
 run() { # captures stdout+stderr in $OUT, status in $ST
   OUT="$("$GITID" "$@" 2>&1)"
   # shellcheck disable=SC2034

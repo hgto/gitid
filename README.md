@@ -95,6 +95,62 @@ gitid: identity mismatch: effective=personal@example.com expected=thomas@work.ex
   fix: gitid work
 ```
 
+### Fail closed instead of committing a hostname identity
+
+By default, when no identity is set and no `[includeIf]` rule matches, Git silently invents
+`you@hostname` and commits it. `gitid guard install` prevents that:
+
+```sh
+gitid guard install
+# gitid: guard installed (useConfigOnly=true, hooksPath=~/.config/git/hooks)
+```
+
+It does two things:
+
+- Sets `user.useConfigOnly=true` globally — Git then **refuses** to auto-detect an identity and
+  aborts any commit where `user.name`/`user.email` can't be resolved from config. This floor holds
+  even under `git commit --no-verify`.
+- Installs a dispatcher (via `core.hooksPath`) covering the standard client-side hooks; on
+  `pre-commit` it also runs the enforcement check below. The dispatcher **chains** to any previous
+  global hooks dir and each repo's own `.git/hooks`, so nothing you already rely on is shadowed.
+
+```sh
+gitid guard status      # show useConfigOnly, hooksPath ownership, and the chain target
+gitid guard uninstall   # restore the previous hooksPath; add --all to also drop useConfigOnly
+```
+
+### Enforce a specific identity per remote
+
+The floor guarantees *some* real identity; enforcement guarantees the *right* one. Mark an identity
+enforced, and any commit whose remote matches a rule mapping to it must use it — a stale or wrong
+identity is rejected:
+
+```sh
+gitid enforce work      # writes gitid.enforce = true into work.gitconfig
+gitid unenforce work
+```
+
+With `guard install` active, committing in a repo whose remote matches an enforced rule while the
+effective identity differs fails:
+
+```
+gitid: identity mismatch (enforced): effective=you@laptop.local expected=jane@work.example.com
+  fix: gitid work
+```
+
+Enforced rules are flagged in `gitid rules` and `gitid show`.
+
+Notes:
+
+- `git commit --no-verify` bypasses enforcement (the floor still applies), and a repo that sets its
+  own **local** `core.hooksPath` opts out of the global hook.
+- The dispatcher chains the standard client-side hooks; the specialized `fsmonitor-watchman` and
+  Perforce (`p4-*`) hooks are not wrapped, so a prior global one of those keeps running only if you
+  invoke it yourself.
+- Because the dispatcher chains each repo's own `.git/hooks`, installing the guard **re-enables**
+  repo-local hooks. If you had set a global `core.hooksPath` specifically to disable untrusted
+  repo-local hooks, note that gitid's chaining runs them again.
+
 ### Migrate inline identities out of repo configs
 
 Dry-run (default — no writes):
