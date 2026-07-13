@@ -210,4 +210,144 @@ t_migrate_global_tilde_unconditional_include() {
 
 t_migrate_global_tilde_unconditional_include
 
+# --- guardrail + enforcement ---------------------------------------------
+
+_isx() { [ -x "$1" ] && printf yes || printf no; }
+_exists() { [ -e "$1" ] && printf yes || printf no; }
+_committed() { if git commit -q "$@" 2>/dev/null; then printf yes; else printf no; fi; }
+seed_rule() { # seed a global includeIf rule for the traversal identity
+  printf '[includeIf "hasconfig:remote.*.url:*github.com[:/]InteractionLabs/**"]\n\tpath = %s/traversal.gitconfig\n' "$GITID_DIR" >> "$SANDBOX/.gitconfig"
+}
+
+t_guard_install_sets_floor_and_hook() {
+  _sandbox
+  run guard install
+  assert_status "$ST" 0 gi_status
+  assert_eq "$(git config --global --bool user.useConfigOnly)" "true" gi_useconfigonly
+  assert_eq "$(git config --global core.hooksPath)" "$GITID_DIR/hooks" gi_hookspath
+  assert_eq "$(_isx "$GITID_DIR/hooks/pre-commit")" "yes" gi_precommit_x
+  assert_eq "$(_isx "$GITID_DIR/hooks/pre-push")" "yes" gi_prepush_x
+  _cleanup
+}
+
+t_guard_status_reports() {
+  _sandbox
+  run guard install; run guard status
+  assert_contains "$OUT" "useConfigOnly: true" gs_uco
+  assert_contains "$OUT" "(gitid)" gs_owned
+  assert_contains "$OUT" "dispatcher:    installed" gs_disp
+  _cleanup
+}
+
+t_enforce_toggles_snippet() {
+  _sandbox
+  run enforce traversal
+  assert_status "$ST" 0 enf_status
+  assert_eq "$(git config -f "$GITID_DIR/traversal.gitconfig" --bool gitid.enforce)" "true" enf_set
+  run unenforce traversal
+  assert_eq "$(git config -f "$GITID_DIR/traversal.gitconfig" --bool gitid.enforce 2>/dev/null || printf unset)" "unset" enf_unset
+}
+
+t_rules_marks_enforced() {
+  _sandbox; r="$(new_repo rulesenf)"; cd "$r" || exit
+  git remote add origin "git@github.com:InteractionLabs/x.git"
+  seed_rule
+  run enforce traversal
+  run rules
+  assert_contains "$OUT" "[enforced]" rulesenf_mark
+  cd /; _cleanup
+}
+
+t_enforced_mismatch_blocks_commit() {
+  _sandbox
+  seed_rule
+  run guard install
+  run enforce traversal
+  r="$(new_repo enfblock)"; cd "$r" || exit
+  git remote add origin "git@github.com:InteractionLabs/x.git"
+  # wrong local identity shadows the rule's expected identity
+  git config --local user.email "hg@example.com"
+  git config --local user.name "Wrong"
+  : > f; git add f
+  assert_eq "$(_committed -m x)" "no" enfblock_blocked
+  cd /; _cleanup
+}
+
+t_enforced_match_commits() {
+  _sandbox
+  seed_rule
+  run guard install
+  run enforce traversal
+  r="$(new_repo enfok)"; cd "$r" || exit
+  git remote add origin "git@github.com:InteractionLabs/x.git"
+  : > f; git add f
+  assert_eq "$(_committed -m x)" "yes" enfok_commits
+  cd /; _cleanup
+}
+
+t_floor_blocks_no_identity() {
+  _sandbox
+  run guard install
+  r="$(new_repo floor)"; cd "$r" || exit
+  : > f; git add f
+  # no rule, no identity -> useConfigOnly makes git refuse
+  assert_eq "$(_committed -m x)" "no" floor_blocked
+  cd /; _cleanup
+}
+
+t_chaining_runs_prev_and_repo_hooks() {
+  _sandbox
+  mkdir -p "$SANDBOX/prevhooks"
+  printf '#!/bin/sh\ntouch "%s/PREV_RAN"\n' "$SANDBOX" > "$SANDBOX/prevhooks/pre-commit"
+  chmod +x "$SANDBOX/prevhooks/pre-commit"
+  git config --global core.hooksPath "$SANDBOX/prevhooks"
+  run guard install
+  assert_eq "$(git config --global gitid.prevHooksPath)" "$SANDBOX/prevhooks" chain_prev_recorded
+  r="$(new_repo chain)"; cd "$r" || exit
+  printf '#!/bin/sh\ntouch "%s/REPO_RAN"\n' "$SANDBOX" > .git/hooks/pre-commit
+  chmod +x .git/hooks/pre-commit
+  run traversal   # gives a valid identity (no rule matches -> enforcement passes)
+  : > f; git add f
+  assert_eq "$(_committed -m x)" "yes" chain_commits
+  assert_eq "$(_exists "$SANDBOX/PREV_RAN")" "yes" chain_prev_ran
+  assert_eq "$(_exists "$SANDBOX/REPO_RAN")" "yes" chain_repo_ran
+  cd /; _cleanup
+}
+
+t_noverify_bypasses_enforcement_not_floor() {
+  _sandbox
+  seed_rule
+  run guard install
+  run enforce traversal
+  r="$(new_repo noverify)"; cd "$r" || exit
+  git remote add origin "git@github.com:InteractionLabs/x.git"
+  git config --local user.email "hg@example.com"
+  git config --local user.name "Wrong"
+  : > f; git add f
+  # --no-verify skips the hook; identity IS set so the floor doesn't fire
+  assert_eq "$(_committed --no-verify -m x)" "yes" noverify_commits
+  cd /; _cleanup
+}
+
+t_uninstall_restores_prev() {
+  _sandbox
+  git config --global core.hooksPath "$SANDBOX/prevhooks"
+  run guard install
+  run guard uninstall
+  assert_eq "$(git config --global core.hooksPath)" "$SANDBOX/prevhooks" uninstall_restored
+  assert_eq "$(_exists "$GITID_DIR/hooks/pre-commit")" "no" uninstall_removed
+  _cleanup
+}
+
+t_guard_install_sets_floor_and_hook
+t_guard_status_reports
+t_enforce_toggles_snippet
+t_rules_marks_enforced
+t_enforced_mismatch_blocks_commit
+t_enforced_match_commits
+t_floor_blocks_no_identity
+t_chaining_runs_prev_and_repo_hooks
+t_noverify_bypasses_enforcement_not_floor
+t_uninstall_restores_prev
+
 summary
