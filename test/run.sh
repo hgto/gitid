@@ -339,8 +339,46 @@ t_uninstall_restores_prev() {
   _cleanup
 }
 
+t_precommit_no_hang_on_pipe_stdin() {
+  # Regression: pre-commit must NOT read stdin. A commit run with an inherited
+  # open pipe as stdin (agent/subprocess context) must not hang on `cat`.
+  tmo=""
+  command -v timeout  >/dev/null 2>&1 && tmo="timeout 8"
+  command -v gtimeout >/dev/null 2>&1 && tmo="gtimeout 8"
+  [ -n "$tmo" ] || return 0   # can't bound runtime portably; skip rather than risk a hang
+  _sandbox
+  run guard install
+  r="$(new_repo pipe)"; cd "$r" || exit
+  run traversal
+  : > f; git add f
+  mkfifo "$SANDBOX/f.fifo"
+  ( exec 9>"$SANDBOX/f.fifo"; sleep 30 ) &   # hold the fifo open well past the timeout
+  wpid=$!
+  $tmo git commit -q -m x < "$SANDBOX/f.fifo"; st=$?
+  kill "$wpid" 2>/dev/null || true
+  assert_status "$st" 0 pipe_no_hang
+  cd /; _cleanup
+}
+
+t_precommit_fails_closed_without_gitid() {
+  # Regression: if the hook can't locate a gitid binary, block the commit
+  # rather than silently skipping enforcement.
+  _sandbox
+  run guard install
+  git config --global gitid.bin "/nonexistent/gitid"
+  r="$(new_repo failclosed)"; cd "$r" || exit
+  run traversal   # valid identity, so only the missing-binary path can block
+  : > f; git add f
+  # PATH without gitid; git itself lives in /usr/bin or /bin
+  if PATH=/usr/bin:/bin git commit -q -m x 2>/dev/null; then out=yes; else out=no; fi
+  assert_eq "$out" "no" failclosed_blocked
+  cd /; _cleanup
+}
+
 t_guard_install_sets_floor_and_hook
 t_guard_status_reports
+t_precommit_no_hang_on_pipe_stdin
+t_precommit_fails_closed_without_gitid
 t_enforce_toggles_snippet
 t_rules_marks_enforced
 t_enforced_mismatch_blocks_commit

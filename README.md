@@ -138,9 +138,18 @@ gitid: identity mismatch (enforced): effective=you@laptop.local expected=jane@wo
   fix: gitid work
 ```
 
-Enforced rules are flagged in `gitid rules` and `gitid show`. Note: `git commit --no-verify` bypasses
-enforcement (the floor still applies), and a repo that sets its own **local** `core.hooksPath` opts
-out of the global hook.
+Enforced rules are flagged in `gitid rules` and `gitid show`.
+
+Notes:
+
+- `git commit --no-verify` bypasses enforcement (the floor still applies), and a repo that sets its
+  own **local** `core.hooksPath` opts out of the global hook.
+- The dispatcher chains the standard client-side hooks; the specialized `fsmonitor-watchman` and
+  Perforce (`p4-*`) hooks are not wrapped, so a prior global one of those keeps running only if you
+  invoke it yourself.
+- Because the dispatcher chains each repo's own `.git/hooks`, installing the guard **re-enables**
+  repo-local hooks. If you had set a global `core.hooksPath` specifically to disable untrusted
+  repo-local hooks, note that gitid's chaining runs them again.
 
 ### Migrate inline identities out of repo configs
 

@@ -229,7 +229,10 @@ cmd_guard_check() {
 
 # client-side hook names installed as dispatchers so a global core.hooksPath
 # never silently shadows a prior global hook or a repo-local .git/hooks entry.
-DISPATCH_HOOKS='applypatch-msg pre-applypatch post-applypatch pre-commit pre-merge-commit prepare-commit-msg commit-msg post-commit pre-rebase post-checkout post-merge pre-push post-rewrite sendemail-validate'
+# The specialized long-running/vendor hooks (fsmonitor-watchman, p4-*) are
+# deliberately omitted — they take non-standard args a generic dispatcher can't
+# safely pass through.
+DISPATCH_HOOKS='applypatch-msg pre-applypatch post-applypatch pre-commit pre-merge-commit prepare-commit-msg commit-msg post-commit pre-rebase post-checkout post-merge pre-auto-gc pre-push post-rewrite post-index-change reference-transaction push-to-checkout sendemail-validate'
 
 write_dispatcher() {
   hd="$1"
@@ -242,20 +245,30 @@ write_dispatcher() {
 set -u
 hook=${0##*/}
 
+# Only these hooks receive meaningful stdin. Capturing it for the others (e.g.
+# pre-commit) would `cat`-block forever when the commit runs as a subprocess
+# with an inherited open pipe as stdin — hanging every commit.
 stdin_file=
-if [ ! -t 0 ]; then
-  stdin_file=$(mktemp)
-  cat >"$stdin_file"
-fi
+case "$hook" in
+  pre-push|post-rewrite|reference-transaction|push-to-checkout)
+    if [ ! -t 0 ]; then
+      stdin_file=$(mktemp)
+      cat >"$stdin_file"
+    fi
+    ;;
+esac
 cleanup() { [ -n "$stdin_file" ] && rm -f "$stdin_file"; }
 feed() { if [ -n "$stdin_file" ]; then "$@" <"$stdin_file"; else "$@"; fi; }
 
 if [ "$hook" = pre-commit ]; then
   bin=$(git config --global --get gitid.bin 2>/dev/null || true)
   [ -x "$bin" ] || bin=$(command -v gitid 2>/dev/null || true)
-  if [ -n "$bin" ]; then
-    "$bin" guard check || { cleanup; exit 1; }
+  if [ -z "$bin" ]; then
+    printf 'gitid: guard hook cannot locate the gitid binary; refusing commit\n' >&2
+    printf '  set gitid.bin, fix PATH, or run: gitid guard uninstall\n' >&2
+    cleanup; exit 1
   fi
+  "$bin" guard check || { cleanup; exit 1; }
 fi
 
 prev=$(git config --global --get gitid.prevHooksPath 2>/dev/null || true)
