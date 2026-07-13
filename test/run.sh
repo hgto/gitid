@@ -342,20 +342,18 @@ t_uninstall_restores_prev() {
 t_precommit_no_hang_on_pipe_stdin() {
   # Regression: pre-commit must NOT read stdin. A commit run with an inherited
   # open pipe as stdin (agent/subprocess context) must not hang on `cat`.
-  tmo=""
-  command -v timeout  >/dev/null 2>&1 && tmo="timeout 8"
-  command -v gtimeout >/dev/null 2>&1 && tmo="gtimeout 8"
-  [ -n "$tmo" ] || return 0   # can't bound runtime portably; skip rather than risk a hang
+  can_bound || return 0   # truly no way to bound runtime; skip rather than risk a hang
   _sandbox
   run guard install
   r="$(new_repo pipe)"; cd "$r" || exit
   run traversal
   : > f; git add f
   mkfifo "$SANDBOX/f.fifo"
-  ( exec 9>"$SANDBOX/f.fifo"; sleep 30 ) &   # hold the fifo open well past the timeout
+  ( exec 9>"$SANDBOX/f.fifo"; sleep 30 ) &   # hold the fifo open well past the bound
   wpid=$!
-  $tmo git commit -q -m x < "$SANDBOX/f.fifo"; st=$?
+  bounded 8 git commit -q -m x < "$SANDBOX/f.fifo"; st=$?
   kill "$wpid" 2>/dev/null || true
+  wait "$wpid" 2>/dev/null || true   # reap so the shell doesn't print a "Terminated" notice
   assert_status "$st" 0 pipe_no_hang
   cd /; _cleanup
 }
