@@ -26,7 +26,7 @@ strip_local_identity() {
 
 hooks_dir() { printf '%s/hooks' "$GITID_DIR"; }
 
-# resolve $0 through any symlink chain to the real script's absolute path
+# Hand-rolled symlink resolution: neither `readlink -f` nor `realpath` is POSIX.
 self_path() {
   self="$0"
   while [ -h "$self" ]; do
@@ -208,10 +208,8 @@ cmd_unenforce() {
   printf 'gitid: %s unenforced\n' "$name"
 }
 
-# enforcement policy invoked by the pre-commit dispatcher: fail only when the
-# repo's remote matches a rule whose identity is enforced and the effective
-# identity differs. No matching rule / rule not enforced -> pass (the
-# useConfigOnly floor covers the no-identity case).
+# Only enforced-identity mismatches fail here; the useConfigOnly floor set by
+# `guard install` already blocks the no-identity case.
 cmd_guard_check() {
   in_repo || return 0
   exp_file="$(expected_identity_file)"

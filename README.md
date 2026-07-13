@@ -110,9 +110,9 @@ It does two things:
 - Sets `user.useConfigOnly=true` globally — Git then **refuses** to auto-detect an identity and
   aborts any commit where `user.name`/`user.email` can't be resolved from config. This floor holds
   even under `git commit --no-verify`.
-- Installs a global `pre-commit` hook (via `core.hooksPath`) that runs the enforcement check below.
-  The hook **chains** to any previous global hooks dir and each repo's own `.git/hooks`, so nothing
-  you already rely on is shadowed.
+- Installs a dispatcher (via `core.hooksPath`) covering the standard client-side hooks; on
+  `pre-commit` it also runs the enforcement check below. The dispatcher **chains** to any previous
+  global hooks dir and each repo's own `.git/hooks`, so nothing you already rely on is shadowed.
 
 ```sh
 gitid guard status      # show useConfigOnly, hooksPath ownership, and the chain target

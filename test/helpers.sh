@@ -17,9 +17,8 @@ _cleanup() { [ -n "${SANDBOX:-}" ] && rm -rf "$SANDBOX"; }
 
 new_repo() { d="$SANDBOX/repo_$1"; mkdir -p "$d"; git -C "$d" init -q; printf '%s' "$d"; }
 
-# run "$@" under a wall-clock bound of $1 seconds using whatever is available
-# (macOS lacks timeout/gtimeout by default; the perl alarm+exec idiom is the
-# portable fallback). Returns 250 when nothing can bound it.
+# macOS lacks timeout/gtimeout by default; perl's alarm+exec is the portable
+# fallback. Returns 250 when nothing can bound execution.
 bounded() {
   n=$1; shift
   if command -v timeout >/dev/null 2>&1; then timeout "$n" "$@"

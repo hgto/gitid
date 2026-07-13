@@ -45,13 +45,18 @@ A global `core.hooksPath` shadows both any prior global hooks dir and every repo
 2. Records the prior `core.hooksPath` in `gitid.prevHooksPath` (only if it isn't already gitid's dir).
 3. Records the resolved absolute gitid path in `gitid.bin` (symlink-resolved).
 4. Points `core.hooksPath` at `$GITID_DIR/hooks`.
-5. Writes one static **dispatcher** script there and symlinks it under the full client-side hook
-   name set (`pre-commit`, `commit-msg`, `pre-push`, `post-checkout`, …).
+5. Writes one static **dispatcher** script there and symlinks it under the client-side hook name
+   set (all client-side hooks except `fsmonitor-watchman` and the `p4-*` hooks, which take
+   non-standard args a generic dispatcher can't safely pass through).
 
 The dispatcher (static; reads all config at runtime, so nothing is baked/interpolated):
 
-1. Captures stdin once to a temp file if present, to replay to multiple chained targets (`pre-push`).
-2. If invoked as `pre-commit`: runs `gitid guard check`; non-zero → abort.
+1. For the hooks that receive meaningful stdin (`pre-push`, `post-rewrite`,
+   `reference-transaction`, `push-to-checkout`): captures it once to a temp file if present, to
+   replay to multiple chained targets. Other hooks (e.g. `pre-commit`) never read stdin, since
+   `cat`-ing an inherited pipe there would block forever.
+2. If invoked as `pre-commit`: runs `gitid guard check`; non-zero → abort. If the `gitid` binary
+   can't be located (via `gitid.bin` or `PATH`), fails closed — abort rather than skip enforcement.
 3. Chains the same-named hook from (a) `gitid.prevHooksPath` and (b) the repo's real
    `.git/hooks` (`git rev-parse --absolute-git-dir`/hooks — never `core.hooksPath`, so no recursion),
    forwarding `"$@"` and the captured stdin; any non-zero target propagates.
@@ -94,4 +99,5 @@ Sandboxed HOME/XDG (existing `_sandbox`). Cases:
 
 - `--no-verify` bypasses enforcement; the floor cannot be bypassed.
 - A repo that sets its own **local** `core.hooksPath` opts out of gitid's global hook.
-- `pre-push` stdin is captured and replayed so chained hooks each receive it.
+- Stdin is captured and replayed for the hooks that receive it (`pre-push`, `post-rewrite`,
+  `reference-transaction`, `push-to-checkout`) so chained hooks each receive it.
