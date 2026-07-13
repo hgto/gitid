@@ -319,7 +319,7 @@ cmd_guard_uninstall() {
   git config --global --unset gitid.prevHooksPath 2>/dev/null || :
   git config --global --unset gitid.bin 2>/dev/null || :
   [ -d "$hd" ] && rm -rf "$hd"
-  [ "$all" -eq 1 ] && git config --global --unset user.useConfigOnly 2>/dev/null || :
+  if [ "$all" -eq 1 ]; then git config --global --unset user.useConfigOnly 2>/dev/null || :; fi
   printf 'gitid: guard uninstalled\n'
 }
 

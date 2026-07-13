@@ -212,8 +212,8 @@ t_migrate_global_tilde_unconditional_include
 
 # --- guardrail + enforcement ---------------------------------------------
 
-_isx() { [ -x "$1" ] && printf yes || printf no; }
-_exists() { [ -e "$1" ] && printf yes || printf no; }
+_isx() { if [ -x "$1" ]; then printf yes; else printf no; fi; }
+_exists() { if [ -e "$1" ]; then printf yes; else printf no; fi; }
 _committed() { if git commit -q "$@" 2>/dev/null; then printf yes; else printf no; fi; }
 seed_rule() {
   printf '[includeIf "hasconfig:remote.*.url:*github.com[:/]InteractionLabs/**"]\n\tpath = %s/traversal.gitconfig\n' "$GITID_DIR" >> "$SANDBOX/.gitconfig"
