@@ -314,6 +314,22 @@ t_chaining_runs_prev_and_repo_hooks() {
   cd /; _cleanup
 }
 
+t_chaining_reads_prev_from_include() {
+  _sandbox
+  mkdir -p "$SANDBOX/prevhooks"
+  printf '#!/bin/sh\ntouch "%s/PREV_RAN"\n' "$SANDBOX" > "$SANDBOX/prevhooks/pre-commit"
+  chmod +x "$SANDBOX/prevhooks/pre-commit"
+  run guard install
+  printf '[gitid]\n\tprevHooksPath = %s/prevhooks\n' "$SANDBOX" > "$SANDBOX/local.gitconfig"
+  printf '[include]\n\tpath = %s/local.gitconfig\n' "$SANDBOX" >> "$SANDBOX/.gitconfig"
+  r="$(new_repo chaininc)"; cd "$r" || exit
+  run traversal
+  : > f; git add f
+  assert_eq "$(_committed -m x)" "yes" chaininc_commits
+  assert_eq "$(_exists "$SANDBOX/PREV_RAN")" "yes" chaininc_prev_ran
+  cd /; _cleanup
+}
+
 t_noverify_bypasses_enforcement_not_floor() {
   _sandbox
   seed_rule
@@ -383,6 +399,7 @@ t_enforced_mismatch_blocks_commit
 t_enforced_match_commits
 t_floor_blocks_no_identity
 t_chaining_runs_prev_and_repo_hooks
+t_chaining_reads_prev_from_include
 t_noverify_bypasses_enforcement_not_floor
 t_uninstall_restores_prev
 
