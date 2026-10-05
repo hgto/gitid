@@ -259,7 +259,7 @@ cleanup() { [ -n "$stdin_file" ] && rm -f "$stdin_file"; }
 feed() { if [ -n "$stdin_file" ]; then "$@" <"$stdin_file"; else "$@"; fi; }
 
 if [ "$hook" = pre-commit ]; then
-  bin=$(git config --global --get gitid.bin 2>/dev/null || true)
+  bin=$(git config --global --includes --get gitid.bin 2>/dev/null || true)
   [ -x "$bin" ] || bin=$(command -v gitid 2>/dev/null || true)
   if [ -z "$bin" ]; then
     printf 'gitid: guard hook cannot locate the gitid binary; refusing commit\n' >&2
@@ -269,7 +269,7 @@ if [ "$hook" = pre-commit ]; then
   "$bin" guard check || { cleanup; exit 1; }
 fi
 
-prev=$(git config --global --get gitid.prevHooksPath 2>/dev/null || true)
+prev=$(git config --global --includes --get gitid.prevHooksPath 2>/dev/null || true)
 gitdir=$(git rev-parse --absolute-git-dir 2>/dev/null || true)
 repo=
 [ -n "$gitdir" ] && repo="$gitdir/hooks"
@@ -340,7 +340,7 @@ cmd_guard_status() {
   else
     printf 'dispatcher:    missing\n'
   fi
-  prev="$(git config --global --get gitid.prevHooksPath 2>/dev/null || true)"
+  prev="$(git config --global --includes --get gitid.prevHooksPath 2>/dev/null || true)"
   [ -n "$prev" ] && printf 'chains to:     %s\n' "$prev"
   return 0
 }
